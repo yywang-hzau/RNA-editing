@@ -1,0 +1,509 @@
+import os
+import pandas as pd
+import numpy as np
+
+def mkdir(dir):
+    if not os.path.exists(dir):
+        os.makedirs(dir)
+
+def f(x):
+    if '[F]&[R]/' in x:
+        read = x.split('[F]&[R]/')[0].split('|')[0]
+        level = x.split('[F]&[R]/')[0].split('|')[-1]
+        dv = round(int(read) * float(level))
+        return str(read) + '#' + str(dv) + '#' + str(level)
+    elif '/[F]&[R]' in x:
+        read = x.split('/[F]&[R]')[1].split('|')[0]
+        level = x.split('/[F]&[R]')[1].split('|')[-1]
+        dv = round(int(read) * float(level))
+        return str(read) + '#' + str(dv) + '#' + str(level)
+
+    elif '[F]&[R]' in x and '[F]&[R]/' not in x and '/[F]&[R]' not in x:
+        left_read = x.split('[F]&[R]')[0].split('|')[0]
+        right_read = x.split('[F]&[R]')[1].split('|')[0]
+        left_level = x.split('[F]&[R]')[0].split('|')[-1]
+        right_level = x.split('|')[-1]
+        left_dv = round(int(left_read) * float(left_level))
+        right_dv = round(int(right_read) * float(right_level))
+
+        editing_level = (float(left_level) + float(right_level)) / 2
+        editing_read = (int(left_read) + int(right_read)) / 2
+        editing_dv = (int(left_dv) + int(right_dv)) / 2
+
+        return str(editing_read) + '#' + str(editing_dv) + '#' + str(editing_level)
+    else:
+        return '0'+ '#' + '0'+ '#' + '0'
+
+def filter_total_site(dir):
+    os.chdir(dir)
+    df1=pd.read_csv('merge_editing_type_ann_412.txt',sep='\t')
+    df_sample=pd.read_csv('5hosts_sample.txt',sep='\t')
+
+    list1 = df_sample['sample'].values.tolist()
+    list2=set(df_sample['Group'].values.tolist())
+
+    column1 = df1.columns.values.tolist()
+
+    for i2 in list2:
+        df2 = pd.DataFrame()
+        for i_col in column1:
+            if i2.strip() in i_col and i_col in list1:
+                df2[i_col]=df1[i_col]
+            for i1 in column1[0:2]:
+                df2[i1] = df1[i1]
+
+        df2[i2+'miss_count']=df2.isnull().sum(axis=1)
+        df2=df2[df2[i2+'miss_count']<=1]
+        df2=df2.fillna('NA')
+        for index, row in df2.iterrows():
+
+            values = list(set(row[2:6]))
+
+            f=str(row).count('[F]')
+            r=str(row).count('[R]')
+
+            count1=f+r
+
+            if 'NA' in values:
+                if len(values) > 2 and  count1==3:
+                    df2.loc[index,i2+'_type']='F'
+                elif len(values) > 2 and  count1 > 3:
+                    df2.loc[index, i2+'_type'] = 'Unknown'
+                elif len(values)==2:
+                    df2.loc[index,i2+'_type']='T'
+            elif 'NA' not in values:
+                if len(values) > 1 and  count1==4:
+                    df2.loc[index,i2+'_type']='F'
+                elif len(values) > 1 and  count1 > 4 :
+                    df2.loc[index, i2+'_type'] = 'Unknown'
+                elif len(values) == 1:
+                    df2.loc[index,i2+'_type']='T'
+
+        df3 = df2[~(df2[i2+'_type'] == 'F')]
+        #df2.to_csv(i2+'_type.txt',sep='\t',index=None)
+        #df3.to_csv(i2+'_type_removeF.txt',sep='\t',index=None)
+
+def merge_filter(dir):
+    os.chdir(dir)
+    df1 = pd.read_csv('merge.txt', sep='\t')
+    # 合并总表格
+
+    for file in os.listdir(dir):
+        if os.path.isfile(file) and file.endswith('removeF.txt'):
+            print(file)
+            df2 = pd.read_csv(file, sep='\t')
+
+            df1 = pd.merge(df1, df2, on=['chr', 'pos'], how='outer')
+    df1=df1.fillna('NA')
+    df1 = df1.sort_values(by=['chr','pos'])
+    df1.to_csv('merge_filter.txt', sep='\t', index=None)
+
+def reflect_to_gene(dir):
+    os.chdir(dir)
+    #tab分隔第一列染色体，第二列位点
+    with open('merge_filter.txt','r') as f1:
+        list1=f1.readlines()
+
+    with open('genes_n.gff','r') as f4:
+        list4=f4.readlines()
+
+    with open('gene_RES.txt','w') as f11:
+        f11.write('chr'+'\t'+'pos'+'\t'+'gene_id'+'\n')
+
+        for i in list1[1:]:
+            i=i.strip()
+            chr=i.split('\t')[0]
+            pos=i.split('\t')[1]
+            for i4 in list4:
+                i4=i4.strip()
+                left=i4.split(' ')[1]
+                right=i4.split(' ')[2]
+                if chr == i4.split(' ')[0]:
+                    if int(pos) > int(left) and int (pos) < int(right):
+                        id=i4.split('geneID=')[1]
+
+                        f11.write(chr+'\t'+pos+'\t'+id+'\n')
+
+def merge_type_read(dir):
+    os.chdir(dir)
+    df0= pd.read_csv('5hosts_sample.txt', sep='\t', error_bad_lines=False)
+    df_filter=pd.read_csv('merge_filter.txt',sep='\t')
+    df1=df_filter[['chr','pos']]
+    df2=pd.read_csv('merge_bed_ann.txt',sep='\t',low_memory=False)
+    df2=df2.fillna('NA')
+    df3=pd.DataFrame()
+
+
+    list1 = df0['sample'].values.tolist()
+    column1 = df2.columns.values.tolist()
+    for i1 in column1[0:3]:
+        df3[i1]=df2[i1]
+
+    for i2 in list1:
+        if i2 in column1[3:]:
+            df_n=pd.DataFrame()
+            df2[i2]=df2[i2].apply(lambda x: f(str(x)))
+            df_n=df2[i2].str.split('#',expand=True)
+
+            df_n2=df_n[(df_n[0].map(float)>10) &(df_n[1].map(float)>3) & (df_n[2].map(float)>0.05)]
+            df_n2=df_n2.copy()
+            df_n2['pass']='PASS'
+
+            df3[i2+'_DP']=df_n[0]
+            df3[i2+'_AD']=df_n[1]
+            df3[i2+'_Level']=df_n[2]
+            df3[i2+'pass']= df_n2['pass']
+
+    df3['Site']=df3['chr']+'_'+df3['pos'].map(str)
+    df4 = pd.merge(df1,df3,how='inner',on=['chr','pos'])
+
+
+    df4.to_csv('editing_dp_ad_level.txt', sep='\t', index=None)
+    #为计算turkey做准备，暂不过滤太狠
+    list_col2=[]
+    df_col=pd.DataFrame()
+    with open('col_name2.txt', 'r') as f2:
+        for item2 in f2.readlines():
+            list_col2.append(item2.strip())
+
+    list4=df4.columns.values.tolist()
+    for i2 in list_col2:
+        if i2 in list4:
+            df_col[i2]=df4[i2]
+            df_col[i2]=df_col[i2].apply(lambda x :0 if x=='NA' else x )
+    df_col.to_csv('pure_level.txt', sep='\t', index=None)
+
+def host_specific_RES(dir):
+    os.chdir(dir)
+
+    with open('editing_level_turkey_final.txt','r') as f1:
+        with open('temp.txt','w') as f2:
+            dict={}
+            for i in f1.readlines():
+                i=i.strip()
+                i=i.replace(' ','_')
+                if i=='x':
+                    continue
+                else:
+                    seq=[]
+                    id=i.split(':')[-1]
+
+                    seq.append(i.split(':')[0]+'|'+'padj|'+i.split(':')[1])
+
+                    if id not in dict:
+                        dict[id] = seq
+                    else:
+                        dict[id] += seq
+            for k, v in dict.items():
+                f2.write(k + '\t')
+                seq1 = ';'.join(v)
+                f2.write(seq1 + '\n')
+
+    with open('temp.txt', 'r') as f3:
+        with open('editing_level_turkey_table.txt', 'w') as f4:
+            f4.write(
+                'Site'+'\t'+'turkey_result' +'\t'
+                'Nb_sig' + '\t' + 'Bn_sig' + '\t' + 'At_sig' + '\t' + 'Zm_sig' + '\t' + 'Ta_sig' + '\n')
+            for i2 in f3.readlines():
+                i2 = i2.strip()
+                site=i2.split('\t')[0]
+                turkey_result=i2.split('\t')[1]
+                nb = str(i2.count('Nb'))
+                bn = str(i2.count('Bn'))
+                at = str(i2.count('At'))
+                zm = str(i2.count('Zm'))
+                ta = str(i2.count('Ta'))
+                list2 = [nb, bn, at, zm, ta]
+                seq = '\t'.join(list2)
+                f4.write(site + '\t' + turkey_result + '\t' + str(seq) + '\n')
+
+
+def merge_all_needed(dir):
+    #有重复值，同一位点在不同基因中出现
+    os.chdir(dir)
+
+    df2=pd.read_csv('editing_dp_ad_level.txt',sep='\t')
+    #df2=df2[df2['filter']=='PASS']
+    df2=df2.fillna('NA')
+    df2['S_NS'] = df2.missense.apply(lambda x: 'synnonymous' if x == 'NA' else 'nonsynonymous')
+
+
+    df_gene=pd.read_csv('gene_RES.txt',sep='\t')
+    df_gene=df_gene.drop_duplicates()
+
+    df_feature=pd.read_csv('region_412.txt',sep='\t')
+
+    df_turkey=pd.read_csv('editing_level_turkey_table.txt',sep='\t')
+
+    df_editing_type=pd.read_csv('merge_filter.txt',sep='\t')
+    df_editing_type.drop(['WHmiss_count','WH_type','Nbmiss_count',
+                                         'Nb_type','ATmiss_count','AT_type','BNmiss_count','BN_type',
+                                         'ZMmiss_count','ZM_type'], axis=1, inplace=True)
+    df_editing_type=df_editing_type.fillna('NA')
+
+    for index,row in df_editing_type.iterrows():
+
+        values = list(set(row[3:]))
+        df_editing_type.loc[index, 'type'] =''.join(values)
+
+    df_editing_type['type']=df_editing_type['type'].apply(lambda x: str(x).replace('NA', ''))
+
+
+    df4=pd.merge(df2,df_gene,how='left',on=['chr','pos'])
+    df5=pd.merge(df4,df_feature,how='left',on=['chr','pos'])
+    df6=pd.merge(df5,df_editing_type,how='left',on=['chr','pos'])
+    df7=pd.merge(df6,df_turkey,how='left',on=['Site'])
+
+    df7.fillna('NA',inplace=True)
+    df7=df7.drop_duplicates()
+    df7=df7.sort_values(by=['chr','pos'])
+    df7.to_csv('merge_all_site_selection.txt',sep='\t',index=None)
+
+    df8=df7[['Site','type']]
+    df8.to_csv('Site_selection_sort.txt', sep='\t', index=None)
+
+
+
+
+def cluster_res(dir):
+    os.chdir(dir)
+    list_result=[]
+
+    with open('Site_selection_413.txt','r') as f1:
+        list1=f1.readlines()
+    list_result.append(list1[1])
+    for i1 in list1[2:]:
+        i1= i1.strip()
+        start=list_result[-1].split('_')[2].split('\t')[0]
+
+        end=i1.split('_')[2].split('\t')[0].split('\t')[0]
+        len1=int(end)-int(start)
+        if i1.split('\t')[1] in list_result[-1] and len1< 2000:
+            list_result.append('\t'+'###'+i1)
+        else:
+            list_result.append(i1)
+
+    with open('site_cluster4000.txt','w') as f4:
+        for line in list_result[1:]:
+            line=line.strip()
+
+            if '###' in line:
+                f4.write(line+'\t')
+            else:
+                f4.write('\n'+line)
+
+    with open('site_cluster4000.txt','r') as f5:
+        list2=f5.readlines()
+    with open('site_sort_cluster_4000.txt','w') as f6:
+        for i in list2[1:]:
+            i=i.strip()
+            count1=1+i.count('###')
+            if count1>2:
+
+                left=i.split('_')[2].split('\t')[0]
+                right=i.split('_')[-1].split('\t')[0]
+                chr2=i.split('_')[0]+'_'+i.split('_')[1]
+                len=int(right)-int(left)
+                if len<3000:
+                    f6.write(chr2+'\t'+left+'\t'+right+'\t'+str(count1)+'\t'+i.split('\t')[-1]+'\n')
+
+
+def drop_replicates(dir):
+    os.chdir(dir)
+
+    with open('pass_col.txt','r') as f1:
+        list1=f1.readlines()
+
+    df_filter = pd.read_csv('5hosts_rna_snp.txt', sep='\s+', low_memory=False)
+
+    #每个寄主构建一个数据集
+    df_nb = pd.DataFrame()
+    df_at = pd.DataFrame()
+    df_bn = pd.DataFrame()
+    df_zm = pd.DataFrame()
+    df_ta = pd.DataFrame()
+
+
+    column1 = df_filter.columns.values.tolist()
+    for i in list1:
+        i=i.strip()
+        for i1 in column1:
+            if i1 == 'CHROM':
+                df_at['CHROM']=df_filter['CHROM']
+                df_nb['CHROM'] = df_filter['CHROM']
+                df_bn['CHROM'] = df_filter['CHROM']
+                df_zm['CHROM'] = df_filter['CHROM']
+                df_ta['CHROM'] = df_filter['CHROM']
+
+
+            if i1=='POS':
+                df_at['POS'] = df_filter['POS']
+                df_nb['POS'] = df_filter['POS']
+                df_bn['POS'] = df_filter['POS']
+                df_zm['POS'] = df_filter['POS']
+                df_ta['POS'] = df_filter['POS']
+
+
+            elif i1==i:
+                if 'BN' in i1:
+                    df_bn[i1]=df_filter[i1]
+                if 'AT' in i1:
+                    df_at[i1]=df_filter[i1]
+                if 'Nb' in i1:
+                    df_nb[i1]=df_filter[i1]
+                if 'ZM' in i1:
+                    df_zm[i1]=df_filter[i1]
+                if 'WH' in i1:
+                    df_ta[i1]=df_filter[i1]
+
+
+
+    #开始每个寄主循环行，如果每行中Pass超过三个，即四个，那么补上一列pass
+    for row in df_at.itertuples():
+        pass_count = str(row).count('0/1')
+        if int(pass_count) >= 3:
+            df_at.loc[row.Index, 'filter'] = 'PASS'
+    df_at2 = df_at[df_at['filter'] == 'PASS']
+    df_at2.rename(columns={'filter': 'At_filter'}, inplace=True)
+
+    for row in df_bn.itertuples():
+        pass_count = str(row).count('0/1')
+        if int(pass_count) >= 3:
+            df_bn.loc[row.Index, 'filter'] = 'PASS'
+    df_bn2 =df_bn[df_bn['filter'] == 'PASS']
+    df_bn2.rename(columns={'filter': 'Bn_filter'}, inplace=True)
+
+    for row in df_nb.itertuples():
+        pass_count = str(row).count('0/1')
+        if int(pass_count) >= 3:
+            df_nb.loc[row.Index, 'filter'] = 'PASS'
+    df_nb2 = df_nb[df_nb['filter'] == 'PASS']
+    df_nb2.rename(columns={'filter': 'Nb_filter'}, inplace=True)
+
+    for row in df_zm.itertuples():
+        pass_count = str(row).count('0/1')
+        if int(pass_count) >= 3:
+            df_zm.loc[row.Index, 'filter'] = 'PASS'
+    df_zm2 =df_zm[df_zm['filter'] == 'PASS']
+    df_zm2.rename(columns={'filter': 'Zm_filter'}, inplace=True)
+
+    for row in df_ta.itertuples():
+        pass_count = str(row).count('0/1')
+        if int(pass_count) > 3:
+            df_ta.loc[row.Index, 'filter'] = 'PASS'
+    df_ta2 =df_ta[df_ta['filter'] == 'PASS']
+    df_ta2.rename(columns={'filter': 'Ta_filter'}, inplace=True)
+
+    df2=pd.merge(df_at2,df_bn2,how='outer',on=['CHROM','POS'])
+    df3=pd.merge(df2,df_nb2,how='outer',on=['CHROM','POS'])
+    df4=pd.merge(df3, df_ta2, how='outer',on=['CHROM','POS'])
+    df5=pd.merge(df4,df_zm2,how='outer',on=['CHROM','POS'])
+    df5 = df5.fillna(0)
+
+    df5.to_csv('RES_gatk_filter_0519.txt', sep='\t', index=None)
+
+
+
+
+def remove_known_snp(dir):
+    #这一步还是会产生少量冗余
+    os.chdir(dir)
+    df1=pd.read_csv('snp_dna_uniq.txt',sep='\t')
+    print(len(df1))
+    df2=pd.read_csv('RES_filter_0518.txt',sep='\t')
+    print(len(df2))
+    df3=df2.append(df1)
+    print(len(df3))
+    #合并以后去重复df1 dna df2 res，这里是keep=false,有重复就去掉
+    df4=df3.drop_duplicates(subset=['Site'],keep=False)
+    print(len(df4))
+    #因为df1多了很多，因此需要把df1的冗余再次去掉
+    df5=df4.append(df1)
+    df6 = df5.drop_duplicates(subset=['Site'], keep=False)
+    print(len(df6))
+    df6.to_csv('RES_PASS_0518_removedna.txt',sep='\t',index=None)
+
+
+
+
+def upsetR(dir):
+    os.chdir(dir)
+    df1 = pd.read_csv('res_pass_0520_containg_dup.txt', sep='\t')
+    df1 = df1.fillna(0)
+    #df2 = df1[['Site', 'At_filter', 'Bn_filter', 'Nb_filter', 'Ta_filter', 'Zm_filter']]
+    #df2.to_csv('RES_pass_0518.txt', sep='\t', index=None)
+
+    column_pass = df1.columns.values.tolist()
+    for col in column_pass[1:]:
+        df1[col] = df1[col].apply(lambda x: 1 if x != '0' else 0)
+    df1.to_csv('upsetr_res_containg_rep.txt',sep='\t',index=None)
+
+
+def merge(dir):
+    os.chdir(dir)
+    df1=pd.read_csv('RES_filter_0520_level.txt',sep='\t')
+    df2=pd.read_csv('zm.specific.txt',sep='\t')
+    df3=pd.merge(df1,df2,how='right',on='Site')
+
+    df3.to_csv('zm.specific_gene.txt',sep='\t',index=None)
+
+
+
+
+
+def main():
+    dir = '/Users/yuanyuan/Downloads/yzc/RNA-editing/5hosts/'
+    """
+    第一步，按照条件过滤，现在是要求四个重复中至少三个存在，且editing_type相同
+
+    """
+    #filter_total_site(dir)
+    #merge_filter(dir)
+
+    """
+    第二步，RES该转成基因的转成基因，运行速度比较慢，20min左右，但是由于是单个位点，暂时没有更好的方法
+    """
+    #reflect_to_gene(dir)
+
+    """
+     第三步，dp > 10 ad > 3 edlevel > 0.05 过滤，计算turkey
+
+     """
+    #merge_type_read(dir)
+
+    host_specific_RES(dir)
+
+
+
+    """
+    需要加chro，pos，type，feature，gene_id，S_NS，AD，DP，level。
+    再加上差异位点分析，如果pvalue啥的。
+    type为12种，feature为CDS和5'UTR等，S_NS为synonymous/nonsynonymous
+    """
+    #merge_all_needed(dir)
+
+    """
+    按照规律提取cluster,注意排序
+    
+    """
+    #cluster_res(dir)
+
+    #drop_replicates(dir)
+
+
+    #由于目前的表格中，三个重复、两个重复的依旧存在，想要保留所有寄主中仅存在于四个重复中的位点
+
+
+
+    #remove_known_snp(dir)
+    #upsetR(dir)
+
+
+    #merge(dir)
+
+
+
+
+
+main()
+print('finish')
